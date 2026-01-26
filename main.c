@@ -24,6 +24,13 @@ typedef struct
 {
     size_t capacity;
     size_t index;
+    char **data;
+} OPERATION;
+
+typedef struct
+{
+    size_t capacity;
+    size_t index;
     char **name;
     int *data;
 } INT;
@@ -53,16 +60,19 @@ typedef struct
 } CHAR;
 
 LEXER *lexer_stack;
+OPERATION *operation_stack;
 INT *int_stack;
 STR *str_stack;
 FLOAT *float_stack;
 CHAR *char_stack;
 
-void find_variable(char *data, size_t count);
+void find_variable(char *data, size_t indx_count, bool init_parse);
 char *combine_char(size_t start, size_t end, char *data);
 void addChar(char *str, char c);
 char *find_variable_data_type(char *variable);
 char *space_adjust(char *data);
+char *combine_two(const char *data1, const char *data2);
+char *operation_concat(const OPERATION *op);
 
 void init_lexer_stack()
 {
@@ -92,6 +102,40 @@ void change_lexer_type(size_t i, char *type)
     lexer_stack->type[i] = strdup(type);
 }
 
+void init_operation_stack()
+{
+    operation_stack = malloc(sizeof(OPERATION));
+    operation_stack->capacity = 1;
+    operation_stack->index = 0;
+    operation_stack->data = malloc(operation_stack->capacity * sizeof(char *));
+}
+
+void add_operetors(char *data)
+{
+    if (int_stack->capacity <= int_stack->index)
+    {
+        operation_stack->capacity *= 2;
+        operation_stack->data = realloc(operation_stack->data, operation_stack->capacity * sizeof(char *));
+    }
+
+    operation_stack->data[operation_stack->index] = strdup(data);
+    operation_stack->index++;
+}
+
+void free_operation_stack(OPERATION *op)
+{
+    if (!op) return;
+    
+    for (size_t i = 0; i < op->index; i++)
+    {
+        free(op->data[i]);   
+    }
+    free(op->data);  
+    free(op);  
+    init_operation_stack();             
+}
+
+
 void init_int_stack()
 {
     int_stack = malloc(sizeof(INT));
@@ -101,7 +145,7 @@ void init_int_stack()
     int_stack->name = malloc(int_stack->capacity * sizeof(char *));
 }
 
-void add_int(int data, const char *name)
+void add_int(int data, char *name)
 {
     if (int_stack->capacity <= int_stack->index)
     {
@@ -214,6 +258,9 @@ bool init_var = false;
 char *method_name = "none";
 char *return_type = "none";
 
+char *pre_text = "none";
+char *next_text = "none";
+
 void addChar(char *str, char c)
 {
     size_t len = strlen(str);
@@ -256,12 +303,22 @@ void init_variable()
     for (size_t j = 0; j < lexer_stack->index; j++)
     {
         char *new_lexer = space_adjust(lexer_stack->data[j]);
-        find_variable(new_lexer, j);
+        find_variable(new_lexer, j, true);
     }
 }
 
-void find_variable(char *data, size_t indx_count)
+void add_values_var()
 {
+    for (size_t j = 0; j < lexer_stack->index; j++)
+    {
+        char *new_lexer = space_adjust(lexer_stack->data[j]);
+        find_variable(new_lexer, j, false);
+    }
+}
+
+void find_variable(char *data, size_t indx_count, bool init_parse)
+{
+    bool is_operator = false;
     size_t count = 0;
     for (size_t i = 0; i < strlen(data); i++)
     {
@@ -311,18 +368,32 @@ void find_variable(char *data, size_t indx_count)
             char *txt = combine_char(count, i, data);
             count = i + 1;
 
+            if (
+                !isString &&
+                (strcmp(txt, "+") == 0 ||
+                 strcmp(txt, "-") == 0 ||
+                 strcmp(txt, "/") == 0 ||
+                 strcmp(txt, "*") == 0))
+            {
+                // char *dt = combine_two(pre_text, txt);
+                // add_operetors(dt);
+                is_operator = true;
+            }
+
             if (isVariable)
             {
                 if (is_variable_name)
                 {
                     variable_Name = txt;
                     is_variable_name = false;
+                    pre_text = txt;
                     continue;
                 }
             }
 
             if (is_value && !is_variable_name)
             {
+                add_operetors(txt);
                 continue;
             }
 
@@ -330,6 +401,7 @@ void find_variable(char *data, size_t indx_count)
             {
                 is_variable_name = false;
                 is_value = true;
+                pre_text = txt;
                 continue;
             }
 
@@ -339,6 +411,7 @@ void find_variable(char *data, size_t indx_count)
                 isVariable = true;
                 data_type = "int";
                 init_var = true;
+                pre_text = txt;
                 continue;
             }
             else if (strcmp(txt, "float") == 0)
@@ -347,6 +420,7 @@ void find_variable(char *data, size_t indx_count)
                 isVariable = true;
                 data_type = "float";
                 init_var = true;
+                pre_text = txt;
                 continue;
             }
             else if (strcmp(txt, "str") == 0)
@@ -355,6 +429,7 @@ void find_variable(char *data, size_t indx_count)
                 isVariable = true;
                 data_type = "str";
                 init_var = true;
+                pre_text = txt;
                 continue;
             }
             else if (strcmp(txt, "char") == 0)
@@ -363,6 +438,7 @@ void find_variable(char *data, size_t indx_count)
                 isVariable = true;
                 data_type = "char";
                 init_var = true;
+                pre_text = txt;
                 continue;
             }
             else
@@ -371,48 +447,64 @@ void find_variable(char *data, size_t indx_count)
                 type_var_g = find_variable_data_type(txt);
                 if (strcmp(type_var_g, "int") == 0)
                 {
-                    is_variable_name = true;
+                    variable_Name = txt;
+                    // is_variable_name = true;
                     isVariable = true;
                     data_type = "int";
                     init_var = true;
+                    pre_text = txt;
                     continue;
                 }
                 else if (strcmp(type_var_g, "float") == 0)
                 {
-                    is_variable_name = true;
+                    // is_variable_name = true;
                     isVariable = true;
                     data_type = "float";
                     init_var = true;
+                    pre_text = txt;
                     continue;
                 }
                 else if (strcmp(type_var_g, "str") == 0)
                 {
-                    is_variable_name = true;
+                    // is_variable_name = true;
                     isVariable = true;
                     data_type = "str";
                     init_var = true;
+                    pre_text = txt;
                     continue;
                 }
                 else if (strcmp(type_var_g, "char") == 0)
                 {
-                    is_variable_name = true;
+                    // is_variable_name = true;
                     isVariable = true;
                     data_type = "char";
                     init_var = true;
+                    pre_text = txt;
                     continue;
                 }
             }
+            pre_text = txt;
         }
     }
 
     char *txts = combine_char(count, strlen(data), data);
+    add_operetors(txts);
+
+    if (is_operator)
+    {
+        add_operetors(txts);
+        char *d = operation_concat(operation_stack);
+        printf("operation_concat : %s\n", d);
+        printf("is_operator : %d\n", is_operator);
+        printf("free\n"); 
+    }
 
     if (string_ditected)
         txts = combine_char(count + 1, strlen(data) - 1, data);
     if (char_ditected)
         txts = combine_char(count + 1, strlen(data) - 1, data);
 
-    if (!declear_var)
+    if (!declear_var && init_parse)
     {
         if (strcmp(data_type, "int") == 0)
         {
@@ -446,8 +538,9 @@ void find_variable(char *data, size_t indx_count)
                 add_char(txts[0], variable_Name);
             }
         }
+        pre_text = txts;
     }
-    else
+    else if (declear_var && !init_parse)
     {
         if (strcmp(type_var_g, "int") == 0)
         {
@@ -481,8 +574,11 @@ void find_variable(char *data, size_t indx_count)
                 add_char(txts[0], variable_Name);
             }
         }
+        pre_text = txts;
     }
 
+    free_operation_stack(operation_stack);
+    
     declear_var = false;
     init_var = false;
     char_ditected = false;
@@ -493,7 +589,9 @@ void find_variable(char *data, size_t indx_count)
     isVariable = false;
     is_variable_name = false;
     is_value = false;
+    is_operator = false;
     data_type = "none";
+    variable_Name = "none";
 }
 
 char *space_adjust(char *data)
@@ -524,6 +622,62 @@ char *space_adjust(char *data)
             continue;
         }
 
+        if (current != ' ' && next == '+')
+        {
+            new_data[j++] = current;
+            new_data[j++] = ' ';
+            continue;
+        }
+
+        if (current == '+' && next != ' ')
+        {
+            new_data[j++] = current;
+            new_data[j++] = ' ';
+            continue;
+        }
+
+        if (current != ' ' && next == '-')
+        {
+            new_data[j++] = current;
+            new_data[j++] = ' ';
+            continue;
+        }
+
+        if (current == '-' && next != ' ')
+        {
+            new_data[j++] = current;
+            new_data[j++] = ' ';
+            continue;
+        }
+
+        if (current != ' ' && next == '*')
+        {
+            new_data[j++] = current;
+            new_data[j++] = ' ';
+            continue;
+        }
+
+        if (current == '*' && next != ' ')
+        {
+            new_data[j++] = current;
+            new_data[j++] = ' ';
+            continue;
+        }
+
+        if (current != ' ' && next == '/')
+        {
+            new_data[j++] = current;
+            new_data[j++] = ' ';
+            continue;
+        }
+
+        if (current == '/' && next != ' ')
+        {
+            new_data[j++] = current;
+            new_data[j++] = ' ';
+            continue;
+        }
+
         new_data[j++] = current;
     }
 
@@ -537,8 +691,8 @@ char *find_variable_data_type(char *variable)
     {
         if (strcmp(int_stack->name[i], variable) == 0)
         {
-            return "int";
             index_var_g = i;
+            return "int";
         }
     }
 
@@ -546,8 +700,8 @@ char *find_variable_data_type(char *variable)
     {
         if (strcmp(float_stack->name[i], variable) == 0)
         {
-            return "float";
             index_var_g = i;
+            return "float";
         }
     }
 
@@ -555,8 +709,8 @@ char *find_variable_data_type(char *variable)
     {
         if (strcmp(str_stack->name[i], variable) == 0)
         {
-            return "str";
             index_var_g = i;
+            return "str";
         }
     }
 
@@ -564,8 +718,8 @@ char *find_variable_data_type(char *variable)
     {
         if (strcmp(char_stack->name[i], variable) == 0)
         {
-            return "char";
             index_var_g = i;
+            return "char";
         }
     }
     return "none";
@@ -585,9 +739,56 @@ char *combine_char(size_t start, size_t end, char *data)
     return txt;
 }
 
+char *operation_concat(const OPERATION *op)
+{
+
+    if (!op || op->index == 0 || !op->data)
+        return NULL;
+
+    size_t total = 1;
+    for (size_t i = 0; i < op->index; i++)
+    {
+        if (op->data[i])
+            total += strlen(op->data[i]);
+    }
+
+    char *result = malloc(total);
+    if (!result)
+        return NULL;
+
+    char *p = result;
+    for (size_t i = 0; i < op->index; i++)
+    {
+        if (op->data[i])
+        {
+            size_t len = strlen(op->data[i]);
+            memcpy(p, op->data[i], len);
+            p += len;
+        }
+    }
+    *p = '\0';
+    return result;
+}
+
+char *combine_two(const char *data1, const char *data2)
+{
+    size_t len1 = strlen(data1);
+    size_t len2 = strlen(data2);
+
+    char *result = malloc(len1 + len2 + 1);
+    if (!result)
+        return NULL;
+
+    strcpy(result, data1);
+    strcat(result, data2);
+
+    return result;
+}
+
 int main(void)
 {
     init_lexer_stack();
+    init_operation_stack();
     init_int_stack();
     init_str_stack();
     init_float_stack();
@@ -598,14 +799,15 @@ int main(void)
     {
         perror("No file ditected");
     }
+
     tokenization(file);
     init_variable();
+    add_values_var();
 
-    
-    for (size_t i = 0; i < int_stack->index; i++)
-    {
-        printf("data : %d\n", int_stack->data[i]);
-    }
+    // for (size_t i = 0; i < int_stack->index; i++)
+    // {
+    //     printf("data : %d\n", int_stack->data[i]);
+    // }
 
     return 0;
 }
