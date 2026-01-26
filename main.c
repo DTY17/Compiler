@@ -9,6 +9,7 @@ typedef struct
     size_t capacity;
     size_t index;
     char **data;
+    char **type;
 } LEXER;
 
 typedef struct
@@ -57,28 +58,38 @@ STR *str_stack;
 FLOAT *float_stack;
 CHAR *char_stack;
 
-void find_variable(char *data);
+void find_variable(char *data, size_t count);
 char *combine_char(size_t start, size_t end, char *data);
 void addChar(char *str, char c);
 char *find_variable_data_type(char *variable);
+char *space_adjust(char *data);
 
-void init_token_stack()
+void init_lexer_stack()
 {
     lexer_stack = malloc(sizeof(LEXER));
     lexer_stack->capacity = 1;
     lexer_stack->index = 0;
+    lexer_stack->type = malloc(lexer_stack->capacity * sizeof(char *));
     lexer_stack->data = malloc(lexer_stack->capacity * sizeof(char *));
 }
 
-void add_token_stack(char *data)
+void add_lexer_stack(char *data, char *type)
 {
+
     if (lexer_stack->capacity <= lexer_stack->index)
     {
         lexer_stack->capacity = lexer_stack->capacity * 2;
         lexer_stack->data = realloc(lexer_stack->data, lexer_stack->capacity * sizeof(char *));
+        lexer_stack->type = realloc(lexer_stack->type, lexer_stack->capacity * sizeof(char *));
     }
     lexer_stack->data[lexer_stack->index] = strdup(data);
+    lexer_stack->type[lexer_stack->index] = strdup(type);
     lexer_stack->index++;
+}
+
+void change_lexer_type(size_t i, char *type)
+{
+    lexer_stack->type[i] = strdup(type);
 }
 
 void init_int_stack()
@@ -187,6 +198,8 @@ bool is_value = false;
 
 bool isChar = false;
 bool char_ditected = false;
+bool is_in_param = false;
+bool is_method = true;
 
 char *variable_Name = "none";
 char *var_d_type = "none";
@@ -197,6 +210,9 @@ char *type_var_g = "none";
 
 bool declear_var = false;
 bool init_var = false;
+
+char *method_name = "none";
+char *return_type = "none";
 
 void addChar(char *str, char c)
 {
@@ -218,7 +234,8 @@ void tokenization(FILE *file)
         }
         else if (ch == ';')
         {
-            add_token_stack(t);
+            add_lexer_stack(t, "init");
+            // space_adjust(t);
             free(t);
             t = malloc(1);
             t[0] = '\0';
@@ -236,17 +253,19 @@ void tokenization(FILE *file)
 
 void init_variable()
 {
-    for (size_t i = 0; i < lexer_stack->index; i++)
+    for (size_t j = 0; j < lexer_stack->index; j++)
     {
-        find_variable(lexer_stack->data[i]);
+        char *new_lexer = space_adjust(lexer_stack->data[j]);
+        find_variable(new_lexer, j);
     }
 }
 
-void find_variable(char *data)
+void find_variable(char *data, size_t indx_count)
 {
     size_t count = 0;
     for (size_t i = 0; i < strlen(data); i++)
     {
+
         if (is_value && data[i] == '"')
         {
             isString = !isString;
@@ -261,14 +280,32 @@ void find_variable(char *data)
             continue;
         }
 
-        if (!isString)
+        if (!isString && data[i] == '.')
         {
-            if (data[i] == '.')
-            {
-                isFloat = true;
-            }
+            isFloat = true;
         }
 
+        // method ditect section
+        if (!isString && data[i] == '(' && is_variable_name)
+        {
+            is_variable_name = false;
+            is_in_param = true;
+            is_method = true;
+        }
+        if (!isString && data[i] == ')')
+        {
+            is_in_param = false;
+        }
+        if (!isString && data[i] == '{' && is_method)
+        {
+            is_method = true;
+        }
+        if (!isString && data[i] == '}' && is_method)
+        {
+            is_method = false;
+        }
+
+        // Seperator
         if (data[i] == ' ' && !isString)
         {
             char *txt = combine_char(count, i, data);
@@ -368,24 +405,27 @@ void find_variable(char *data)
         }
     }
 
-    char *txt = combine_char(count, strlen(data), data);
+    char *txts = combine_char(count, strlen(data), data);
+
     if (string_ditected)
-        txt = combine_char(count + 1, strlen(data) - 1, data);
+        txts = combine_char(count + 1, strlen(data) - 1, data);
     if (char_ditected)
-        txt = combine_char(count + 1, strlen(data) - 1, data);
+        txts = combine_char(count + 1, strlen(data) - 1, data);
 
     if (!declear_var)
     {
         if (strcmp(data_type, "int") == 0)
         {
-            add_int(atoi(txt), variable_Name);
+            change_lexer_type(indx_count, "VAR");
+            add_int(atoi(txts), variable_Name);
         }
 
         if (strcmp(data_type, "str") == 0)
         {
             if (string_ditected && !isString)
             {
-                add_str(txt, variable_Name);
+                change_lexer_type(indx_count, "VAR");
+                add_str(txts, variable_Name);
             }
         }
 
@@ -393,7 +433,8 @@ void find_variable(char *data)
         {
             if (isFloat)
             {
-                add_float(atof(txt), variable_Name);
+                change_lexer_type(indx_count, "VAR");
+                add_float(atof(txts), variable_Name);
             }
         }
 
@@ -401,7 +442,8 @@ void find_variable(char *data)
         {
             if (char_ditected && !isChar)
             {
-                add_char(txt[0], variable_Name);
+                change_lexer_type(indx_count, "VAR");
+                add_char(txts[0], variable_Name);
             }
         }
     }
@@ -409,14 +451,16 @@ void find_variable(char *data)
     {
         if (strcmp(type_var_g, "int") == 0)
         {
-            change_int(atoi(txt), index_var_g);
+            change_lexer_type(indx_count, "VAR");
+            change_int(atoi(txts), index_var_g);
         }
 
         if (strcmp(type_var_g, "str") == 0)
         {
             if (string_ditected && !isString)
             {
-                add_str(txt, variable_Name);
+                change_lexer_type(indx_count, "VAR");
+                add_str(txts, variable_Name);
             }
         }
 
@@ -424,7 +468,8 @@ void find_variable(char *data)
         {
             if (isFloat)
             {
-                add_float(atof(txt), variable_Name);
+                change_lexer_type(indx_count, "VAR");
+                add_float(atof(txts), variable_Name);
             }
         }
 
@@ -432,7 +477,8 @@ void find_variable(char *data)
         {
             if (char_ditected && !isChar)
             {
-                add_char(txt[0], variable_Name);
+                change_lexer_type(indx_count, "VAR");
+                add_char(txts[0], variable_Name);
             }
         }
     }
@@ -450,7 +496,42 @@ void find_variable(char *data)
     data_type = "none";
 }
 
-char* find_variable_data_type(char *variable)
+char *space_adjust(char *data)
+{
+    size_t len = strlen(data);
+    char *new_data = malloc(len * 2 + 1);
+    if (!new_data)
+        return NULL;
+
+    size_t j = 0;
+
+    for (size_t i = 0; i < len; i++)
+    {
+        char current = data[i];
+        char next = data[i + 1];
+
+        if (current != ' ' && next == '=')
+        {
+            new_data[j++] = current;
+            new_data[j++] = ' ';
+            continue;
+        }
+
+        if (current == '=' && next != ' ')
+        {
+            new_data[j++] = current;
+            new_data[j++] = ' ';
+            continue;
+        }
+
+        new_data[j++] = current;
+    }
+
+    new_data[j] = '\0';
+    return new_data;
+}
+
+char *find_variable_data_type(char *variable)
 {
     for (size_t i = 0; i < int_stack->index; i++)
     {
@@ -506,8 +587,8 @@ char *combine_char(size_t start, size_t end, char *data)
 
 int main(void)
 {
+    init_lexer_stack();
     init_int_stack();
-    init_token_stack();
     init_str_stack();
     init_float_stack();
     init_char_stack();
@@ -520,10 +601,11 @@ int main(void)
     tokenization(file);
     init_variable();
 
+    
     for (size_t i = 0; i < int_stack->index; i++)
     {
-        printf("name : %s , data : %d\n",int_stack->name[i],int_stack->data[i]);
+        printf("data : %d\n", int_stack->data[i]);
     }
-    
+
     return 0;
 }
