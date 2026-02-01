@@ -3,13 +3,24 @@
 #include <string.h>
 #include <stdbool.h>
 #include <ctype.h>
+#include <time.h>
+
+typedef enum
+{
+    INTEGER_DATATYPE,
+    FLOAT_DATATYPE,
+    CHAR_DATATYPE,
+    STR_DATATYPE,
+    NONE
+} DATATYPE;
 
 typedef struct
 {
     size_t capacity;
     size_t index;
     char **data;
-    char **type;
+    char **state;
+    DATATYPE *type;
 } LEXER;
 
 typedef struct
@@ -77,7 +88,7 @@ SUB_OPERATION *sub_operation_stack;
 void find_variable(char *data, size_t indx_count, bool init_parse);
 char *combine_char(size_t start, size_t end, char *data);
 void addChar(char *str, char c);
-char *find_variable_data_type(char *variable);
+DATATYPE find_variable_data_type(char *variable);
 char *space_adjust(char *data);
 char *combine_two(const char *data1, const char *data2);
 char *operation_concat(const OPERATION *op);
@@ -106,25 +117,28 @@ void init_lexer_stack()
     lexer_stack->capacity = 1;
     lexer_stack->index = 0;
     lexer_stack->type = malloc(lexer_stack->capacity * sizeof(char *));
-    lexer_stack->data = malloc(lexer_stack->capacity * sizeof(char *));
+    lexer_stack->state = malloc(lexer_stack->capacity * sizeof(char *));
+    lexer_stack->data = malloc(lexer_stack->capacity * sizeof(DATATYPE));
 }
 
-void add_lexer_stack(char *data, char *type)
+void add_lexer_stack(char *data, char *state, DATATYPE type)
 {
     if (lexer_stack->capacity <= lexer_stack->index)
     {
         lexer_stack->capacity = lexer_stack->capacity * 2;
         lexer_stack->data = realloc(lexer_stack->data, lexer_stack->capacity * sizeof(char *));
-        lexer_stack->type = realloc(lexer_stack->type, lexer_stack->capacity * sizeof(char *));
+        lexer_stack->state = realloc(lexer_stack->state, lexer_stack->capacity * sizeof(char *));
+        lexer_stack->type = realloc(lexer_stack->type, lexer_stack->capacity * sizeof(DATATYPE));
     }
     lexer_stack->data[lexer_stack->index] = strdup(data);
-    lexer_stack->type[lexer_stack->index] = strdup(type);
+    lexer_stack->state[lexer_stack->index] = state;
+    lexer_stack->type[lexer_stack->index] = type;
     lexer_stack->index++;
 }
 
-void change_lexer_type(size_t i, char *type)
+void change_lexer_type(size_t i, DATATYPE type)
 {
-    lexer_stack->type[i] = strdup(type);
+    lexer_stack->type[i] = type;
 }
 
 void init_operation_stack()
@@ -321,7 +335,7 @@ char *var_d_type = "none";
 char *data_type = "none";
 
 int index_var_g = 0;
-char *type_var_g = "none";
+DATATYPE type_var_g = NONE;
 
 bool declear_var = false;
 bool init_var = false;
@@ -352,8 +366,7 @@ void tokenization(FILE *file)
         }
         else if (ch == ';')
         {
-            add_lexer_stack(t, "init");
-            // space_adjust(t);
+            add_lexer_stack(t, "init", NONE);
             free(t);
             t = malloc(1);
             t[0] = '\0';
@@ -389,286 +402,210 @@ void add_values_var()
 
 void find_variable(char *data, size_t indx_count, bool init_parse)
 {
-
     bool is_operator = false;
     size_t count = 0;
-    for (size_t i = 0; i < strlen(data); i++)
+    size_t str_len = strlen(data);
+    DATATYPE type = NONE;
+
+    bool isFloat = false;
+    bool isCharDetected = false;
+    bool isStringDetected = false;
+    bool is_value = false;
+    for (size_t i = 0; i < str_len; i++)
     {
-        if (is_value && data[i] == '"')
-        {
-            isString = !isString;
-            string_ditected = true;
-            continue;
-        }
+        bool is_separator = data[i] == ' ';
 
-        if (is_value && data[i] == '\'')
-        {
-            isChar = !isChar;
-            char_ditected = true;
-            continue;
-        }
-
-        if (!isString && data[i] == '.')
-        {
-            isFloat = true;
-        }
-
-        // method ditect section
-        if (!isString && data[i] == '(' && is_variable_name)
-        {
-            // is_operator = true;
-            is_variable_name = false;
-            is_in_param = true;
-            is_method = true;
-        }
-        if (!isString && data[i] == ')' && is_variable_name)
-        {
-            is_in_param = true;
-            is_operator = true;
-            is_method = true;
-        }
-
-        if (!isString && data[i] == '(')
-        {
-            is_operator = true;
-            is_variable_name = false;
-        }
-        if (!isString && data[i] == ')')
-        {
-            is_operator = true;
-        }
-        if (!isString && data[i] == '{' && is_method)
-        {
-            is_method = true;
-        }
-        if (!isString && data[i] == '}' && is_method)
-        {
-            is_method = false;
-        }
-
-        // Seperator
-        if (data[i] == ' ' && !isString)
+        // Process separators (tokens)
+        if (is_separator && !isString)
         {
             char *txt = combine_char(count, i, data);
             count = i + 1;
 
-            if (
-                !isString &&
-                (strcmp(txt, "+") == 0 ||
-                 strcmp(txt, "-") == 0 ||
-                 strcmp(txt, "/") == 0 ||
-                 strcmp(txt, "*") == 0 ||
-                 strcmp(txt, "(") == 0 ||
-                 strcmp(txt, ")") == 0))
+            bool asign_symbol = *txt == '=';
+            bool is_string = *txt == '"';
+            bool is_char = *txt == '\'';
+            bool is_float = *txt == '.';
+
+            if (asign_symbol)
             {
+                is_value = true;
+                is_variable_name = false;
+                continue;
+            }
+
+            // Detect string, char, float
+            isStringDetected = is_value && is_string;
+            isCharDetected = is_value && is_char;
+            isFloat = !isString && is_float;
+
+            // Update isString for quotes
+            if (is_value && is_string)
+                isString = !isString;
+
+            // Detect datatype
+            if (strcmp(txt, "int") == 0)
+            {
+                isVariable = true;
+                is_variable_name = true;
+                init_var = true;
+                type = INTEGER_DATATYPE;
+                continue;
+            }
+            else if (strcmp(txt, "float") == 0)
+            {
+                isVariable = true;
+                is_variable_name = true;
+                init_var = true;
+                type = FLOAT_DATATYPE;
+                continue;
+            }
+            else if (strcmp(txt, "char") == 0)
+            {
+                isVariable = true;
+                is_variable_name = true;
+                init_var = true;
+                type = CHAR_DATATYPE;
+                continue;
+            }
+            else if (strcmp(txt, "str") == 0)
+            {
+                isVariable = true;
+                is_variable_name = true;
+                init_var = true;
+                type = STR_DATATYPE;
+                continue;
+            }
+
+            // Detect operators (+, -, *, /, (, ))
+            bool operate_symbol = txt[0] != '\0' && txt[1] == '\0' &&
+                                  (txt[0] == '+' || txt[0] == '-' || txt[0] == '*' ||
+                                   txt[0] == '/' || txt[0] == '(' || txt[0] == ')');
+
+            // printf("%d\n",operate_symbol);
+            if (operate_symbol || (is_value && type==INTEGER_DATATYPE))
+            {
+                // printf("operation\n");
+                //add_operetors(txt);
                 is_operator = true;
             }
 
-            if (isVariable)
+            // Variable assignment
+            if (isVariable && is_variable_name)
             {
-                if (is_variable_name)
-                {
-                    variable_Name = txt;
-                    is_variable_name = false;
-                    pre_text = txt;
-                    continue;
-                }
+                variable_Name = txt;
+                is_variable_name = false;
+                pre_text = txt;
+                continue;
             }
 
-            if (is_value && !is_variable_name)
+            if (is_value && !is_variable_name && is_operator)
             {
                 add_operetors(txt);
                 continue;
             }
 
-            if (strcmp(txt, "=") == 0 && isVariable)
-            {
-                is_variable_name = false;
-                is_value = true;
-                pre_text = txt;
-                continue;
-            }
-
-            if (strcmp(txt, "int") == 0)
-            {
-                is_variable_name = true;
-                isVariable = true;
-                data_type = "int";
-                init_var = true;
-                pre_text = txt;
-                continue;
-            }
-            else if (strcmp(txt, "float") == 0)
-            {
-                is_variable_name = true;
-                isVariable = true;
-                data_type = "float";
-                init_var = true;
-                pre_text = txt;
-                continue;
-            }
-            else if (strcmp(txt, "str") == 0)
-            {
-                is_variable_name = true;
-                isVariable = true;
-                data_type = "str";
-                init_var = true;
-                pre_text = txt;
-                continue;
-            }
-            else if (strcmp(txt, "char") == 0)
-            {
-                is_variable_name = true;
-                isVariable = true;
-                data_type = "char";
-                init_var = true;
-                pre_text = txt;
-                continue;
-            }
-            else
-            {
-                declear_var = true;
-                type_var_g = find_variable_data_type(txt);
-                if (strcmp(type_var_g, "int") == 0)
-                {
-                    variable_Name = txt;
-                    isVariable = true;
-                    data_type = "int";
-                    init_var = true;
-                    pre_text = txt;
-                    continue;
-                }
-                else if (strcmp(type_var_g, "float") == 0)
-                {
-                    isVariable = true;
-                    data_type = "float";
-                    init_var = true;
-                    pre_text = txt;
-                    continue;
-                }
-                else if (strcmp(type_var_g, "str") == 0)
-                {
-                    isVariable = true;
-                    data_type = "str";
-                    init_var = true;
-                    pre_text = txt;
-                    continue;
-                }
-                else if (strcmp(type_var_g, "char") == 0)
-                {
-                    isVariable = true;
-                    data_type = "char";
-                    init_var = true;
-                    pre_text = txt;
-                    continue;
-                }
-            }
+            type = find_variable_data_type(txt);
+            declear_var = true;
+            variable_Name = txt;
             pre_text = txt;
         }
     }
-    printf("round\n");
 
-    char *txts = combine_char(count, strlen(data), data);
-    add_operetors(txts);
-    // printf("txts %s\n", txts);
-    // printf("is operation %d\n", is_operator);
+    char *txts = combine_char(count, str_len, data);
+    if (is_value && type == INTEGER_DATATYPE)
+        is_operator = true;
+    // Execute operations if operator detected
     if (is_operator)
     {
+        add_operetors(txts);
         operation_concat(operation_stack);
         bracket_operation();
         remove_underscores(operation_stack);
         int v1 = operation_excute(operation_stack);
         char str[32];
         snprintf(str, sizeof(str), "%d", v1);
-        txts = str;
+        txts = strdup(str);
+        
     }
 
-    if (string_ditected)
-        txts = combine_char(count + 1, strlen(data) - 1, data);
-    if (char_ditected)
-        txts = combine_char(count + 1, strlen(data) - 1, data);
-
+    // Store variables in lexer stack
     if (!declear_var && init_parse)
     {
-        if (strcmp(data_type, "int") == 0)
+        switch (type)
         {
-            change_lexer_type(indx_count, "VAR");
-            add_int(atoi(txts), variable_Name);
-        }
-
-        if (strcmp(data_type, "str") == 0)
-        {
-            if (string_ditected && !isString)
+        case STR_DATATYPE:
+            if (isStringDetected && !isString)
             {
-                change_lexer_type(indx_count, "VAR");
+                change_lexer_type(indx_count, STR_DATATYPE);
                 add_str(txts, variable_Name);
             }
-        }
-
-        if (strcmp(data_type, "float") == 0)
-        {
-            if (isFloat)
+            break;
+        case CHAR_DATATYPE:
+            if (isCharDetected && !isChar)
             {
-                change_lexer_type(indx_count, "VAR");
-                add_float(atof(txts), variable_Name);
-            }
-        }
-
-        if (strcmp(data_type, "char") == 0)
-        {
-            if (char_ditected && !isChar)
-            {
-                change_lexer_type(indx_count, "VAR");
+                change_lexer_type(indx_count, CHAR_DATATYPE);
                 add_char(txts[0], variable_Name);
             }
+            break;
+        case INTEGER_DATATYPE:
+            change_lexer_type(indx_count, INTEGER_DATATYPE);
+            add_int(atoi(txts), variable_Name);
+            break;
+        case FLOAT_DATATYPE:
+            if (isFloat)
+            {
+                change_lexer_type(indx_count, FLOAT_DATATYPE);
+                add_float(atof(txts), variable_Name);
+            }
+            break;
+        default:
+            break;
         }
-        pre_text = txts;
     }
     else if (declear_var && !init_parse)
     {
-        if (strcmp(type_var_g, "int") == 0)
+        switch (type)
         {
-            change_lexer_type(indx_count, "VAR");
-            change_int(atoi(txts), index_var_g);
-        }
-
-        if (strcmp(type_var_g, "str") == 0)
-        {
-            if (string_ditected && !isString)
+        case STR_DATATYPE:
+            if (isStringDetected && !isString)
             {
-                change_lexer_type(indx_count, "VAR");
+                change_lexer_type(indx_count, STR_DATATYPE);
                 add_str(txts, variable_Name);
             }
-        }
-
-        if (strcmp(type_var_g, "float") == 0)
-        {
-            if (isFloat)
+            break;
+        case CHAR_DATATYPE:
+            if (isCharDetected && !isChar)
             {
-                change_lexer_type(indx_count, "VAR");
-                add_float(atof(txts), variable_Name);
-            }
-        }
-
-        if (strcmp(type_var_g, "char") == 0)
-        {
-            if (char_ditected && !isChar)
-            {
-                change_lexer_type(indx_count, "VAR");
+                change_lexer_type(indx_count, CHAR_DATATYPE);
                 add_char(txts[0], variable_Name);
             }
+            break;
+        case INTEGER_DATATYPE:
+            change_lexer_type(indx_count, INTEGER_DATATYPE);
+            change_int(atoi(txts), index_var_g);
+            break;
+        case FLOAT_DATATYPE:
+            if (isFloat)
+            {
+                change_lexer_type(indx_count, FLOAT_DATATYPE);
+                add_float(atof(txts), variable_Name);
+            }
+            break;
+        default:
+            break;
         }
-        pre_text = txts;
+
     }
 
     free_operation_stack(operation_stack);
 
+    // Reset flags
     declear_var = false;
     init_var = false;
-    char_ditected = false;
+    isCharDetected = false;
     isChar = false;
     isString = false;
-    string_ditected = false;
+    isStringDetected = false;
     isFloat = false;
     isVariable = false;
     is_variable_name = false;
@@ -682,129 +619,42 @@ char *space_adjust(char *data)
 {
     size_t len = strlen(data);
     char *new_data = malloc(len * 2 + 1);
-    if (!new_data)
-        return NULL;
+    if (!new_data) return NULL;
 
     size_t j = 0;
-
-    for (size_t i = 0; i < len; i++)
-    {
+    for (size_t i = 0; i < len; i++) {
         char current = data[i];
-        char next = data[i + 1];
 
-        if (current != ' ' && next == '=')
-        {
-            new_data[j++] = current;
+        // If current is a symbol, add space before (if not already space)
+        if ((current == '=' || current == '(' || current == ')' ||
+             current == '+' || current == '-' || current == '/' || current == '*')
+            && j > 0 && new_data[j-1] != ' ') {
             new_data[j++] = ' ';
-            continue;
-        }
-
-        if (current == '=' && next != ' ')
-        {
-            new_data[j++] = current;
-            new_data[j++] = ' ';
-            continue;
-        }
-
-        if (current != ' ' && next == '(')
-        {
-            new_data[j++] = current;
-            new_data[j++] = ' ';
-            continue;
-        }
-
-        if (current == '(' && next != ' ')
-        {
-            new_data[j++] = current;
-            new_data[j++] = ' ';
-            continue;
-        }
-
-        if (current != ' ' && next == ')')
-        {
-            new_data[j++] = current;
-            new_data[j++] = ' ';
-            continue;
-        }
-
-        if (current == ')' && next != ' ')
-        {
-            new_data[j++] = current;
-            new_data[j++] = ' ';
-            continue;
-        }
-
-        if (current != ' ' && next == '+')
-        {
-            new_data[j++] = current;
-            new_data[j++] = ' ';
-            continue;
-        }
-
-        if (current == '+' && next != ' ')
-        {
-            new_data[j++] = current;
-            new_data[j++] = ' ';
-            continue;
-        }
-
-        if (current != ' ' && next == '-')
-        {
-            new_data[j++] = current;
-            new_data[j++] = ' ';
-            continue;
-        }
-
-        if (current == '-' && next != ' ')
-        {
-            new_data[j++] = current;
-            new_data[j++] = ' ';
-            continue;
-        }
-
-        if (current != ' ' && next == '*')
-        {
-            new_data[j++] = current;
-            new_data[j++] = ' ';
-            continue;
-        }
-
-        if (current == '*' && next != ' ')
-        {
-            new_data[j++] = current;
-            new_data[j++] = ' ';
-            continue;
-        }
-
-        if (current != ' ' && next == '/')
-        {
-            new_data[j++] = current;
-            new_data[j++] = ' ';
-            continue;
-        }
-
-        if (current == '/' && next != ' ')
-        {
-            new_data[j++] = current;
-            new_data[j++] = ' ';
-            continue;
         }
 
         new_data[j++] = current;
+
+        // If current is a symbol, add space after (if next isn’t space or end)
+        if ((current == '=' || current == '(' || current == ')' ||
+             current == '+' || current == '-' || current == '/' || current == '*')
+            && (i + 1 < len) && data[i+1] != ' ') {
+            new_data[j++] = ' ';
+        }
     }
 
     new_data[j] = '\0';
     return new_data;
 }
 
-char *find_variable_data_type(char *variable)
+
+DATATYPE find_variable_data_type(char *variable)
 {
     for (size_t i = 0; i < int_stack->index; i++)
     {
         if (strcmp(int_stack->name[i], variable) == 0)
         {
             index_var_g = i;
-            return "int";
+            return INTEGER_DATATYPE;
         }
     }
 
@@ -813,7 +663,7 @@ char *find_variable_data_type(char *variable)
         if (strcmp(float_stack->name[i], variable) == 0)
         {
             index_var_g = i;
-            return "float";
+            return FLOAT_DATATYPE;
         }
     }
 
@@ -822,7 +672,7 @@ char *find_variable_data_type(char *variable)
         if (strcmp(str_stack->name[i], variable) == 0)
         {
             index_var_g = i;
-            return "str";
+            return STR_DATATYPE;
         }
     }
 
@@ -831,10 +681,10 @@ char *find_variable_data_type(char *variable)
         if (strcmp(char_stack->name[i], variable) == 0)
         {
             index_var_g = i;
-            return "char";
+            return CHAR_DATATYPE;
         }
     }
-    return "none";
+    return NONE;
 }
 
 char *combine_char(size_t start, size_t end, char *data)
@@ -1083,7 +933,6 @@ int sub_operation_excute(SUB_OPERATION *operation)
 
 void bracket_operation()
 {
-    printf("on bracket filter");
     size_t start = 0;
     size_t i = 0;
     while (i < operation_stack->index)
@@ -1097,7 +946,7 @@ void bracket_operation()
         }
         else if (strcmp(op, ")") == 0)
         {
-            printf(") detected at %zu\n", i);
+            // printf(") detected at %zu\n", i);
 
             init_operation_sub_stack();
             for (size_t j = start; j < i; j++)
@@ -1111,7 +960,7 @@ void bracket_operation()
             operation_stack->data[start - 1] = strdup("_");
 
             int res = sub_operation_excute(sub_operation_stack);
-            printf("res : %d\n\n", res);
+            // printf("res : %d\n\n", res);
             if (i >= operation_stack->index)
             {
                 fprintf(stderr, "Index %zu out of bounds\n", i);
@@ -1132,9 +981,10 @@ void bracket_operation()
                 fprintf(stderr, "Failed to allocate memory for new string\n");
                 exit(1);
             }
-            test_sub_operation_stack();
+
             free(sub_operation_stack->data);
             i = 0;
+            remove_underscores(operation_stack);
             continue;
         }
         else
@@ -1184,29 +1034,30 @@ void remove_underscores(OPERATION *op)
     if (!op || !op->data)
         return;
 
-    size_t write_index = 0; // where to copy valid entries
+    size_t write_index = 0;
 
     for (size_t i = 0; i < op->index; i++)
     {
         if (strcmp(op->data[i], "_") != 0)
         {
-            // keep this entry
             if (write_index != i)
-                op->data[write_index] = op->data[i]; // move pointer
+                op->data[write_index] = op->data[i];
             write_index++;
         }
         else
         {
-            // free the underscore string
             free(op->data[i]);
         }
     }
 
-    op->index = write_index; // update stack size
+    op->index = write_index;
 }
 
 int main(void)
 {
+    clock_t start, end;
+    double cpu_time_used;
+    start = clock();
     init_lexer_stack();
     init_operation_stack();
     init_int_stack();
@@ -1229,6 +1080,9 @@ int main(void)
     {
         printf("name : %s || data : %d\n", int_stack->name[i], int_stack->data[i]);
     }
+    end = clock();
+    cpu_time_used = (((double)(end - start)) / CLOCKS_PER_SEC);
+    printf("Time taken: %f seconds\n", cpu_time_used);
 
     return 0;
 }
@@ -1238,7 +1092,7 @@ void test_lexer_stack()
     printf("----- LEXER STACK -----\n");
     for (size_t i = 0; i < lexer_stack->index; i++)
     {
-        printf("%zu: data='%s', type='%s'\n", i, lexer_stack->data[i], lexer_stack->type[i]);
+        printf("%zu: data=%s type=%s\n", i, lexer_stack->data[i], lexer_stack->state[i]);
     }
 }
 
