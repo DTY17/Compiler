@@ -1,9 +1,8 @@
-int x = 1;
-int y = 2;
-int z = 3;
-int a = 4;
-int b = 5;
-int c = (b+a)/3*2+1;
+int x= 11;
+int y=222;
 
-float n = 2.3;
-float e = 2.3*2;
+float s =2.43;
+s = 2.2 * 2 +x+y;
+
+if (x<y){}
+

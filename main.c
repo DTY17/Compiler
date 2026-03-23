@@ -11,7 +11,8 @@ typedef enum
     FLOAT_DATATYPE,
     CHAR_DATATYPE,
     STR_DATATYPE,
-    NONE
+    NONE,
+    IF
 } DATATYPE;
 
 typedef struct
@@ -22,6 +23,44 @@ typedef struct
     char **state;
     DATATYPE *type;
 } LEXER;
+
+// typedef struct
+// {
+//     size_t capacity;
+//     size_t index;
+//     char **data;
+//     DATATYPE *type;
+// } CODEBLOCK;
+
+// typedef struct
+// {
+//     size_t capacity;
+//     size_t index;
+//     CODEBLOCK **data;
+//     DATATYPE *type;
+// } CODEBLOCK_LIST;
+
+typedef struct
+{
+    size_t capacity;
+    size_t index;
+    char **data;   // array of strings
+    DATATYPE type; // single enum value
+} CODEBLOCK;
+
+typedef struct
+{
+    size_t capacity;
+    size_t index;
+    CODEBLOCK *data; // array of CODEBLOCKs
+} CODEBLOCK_LIST;
+
+typedef struct
+{
+    size_t capacity;
+    size_t index;
+    char **data;
+} CONDITION;
 
 typedef struct
 {
@@ -84,6 +123,9 @@ STR *str_stack;
 FLOAT *float_stack;
 CHAR *char_stack;
 SUB_OPERATION *sub_operation_stack;
+CODEBLOCK_LIST *list_codeblock;
+
+char **scope_stack = NULL;
 
 void find_variable(char *data, size_t indx_count, bool init_parse);
 char *combine_char(size_t start, size_t end, char *data);
@@ -94,7 +136,7 @@ char *combine_two(const char *data1, const char *data2);
 char *operation_concat(const OPERATION *op);
 int operation_excute(OPERATION *operation);
 float operation_excute_float(OPERATION *operation);
-int sub_operation_excute_float(SUB_OPERATION *operation);
+float sub_operation_excute_float(SUB_OPERATION *operation);
 int sub_operation_excute(SUB_OPERATION *operation);
 void remove_underscores(OPERATION *op);
 
@@ -111,6 +153,21 @@ void test_sub_operation_stack();
 void test_operation_stack();
 void test_lexer_stack();
 
+bool condition_apply(char *data);
+
+bool isNumber(const char *str)
+{
+    int i = 0;
+    if (str[0] == '\0')
+        return false; // empty string
+    while (str[i])
+    {
+        if (!isdigit(str[i]))
+            return false;
+        i++;
+    }
+    return true;
+}
 // char **operation_order = {"-","+","*","/"};
 
 void init_lexer_stack()
@@ -141,6 +198,45 @@ void add_lexer_stack(char *data, char *state, DATATYPE type)
 void change_lexer_type(size_t i, DATATYPE type)
 {
     lexer_stack->type[i] = type;
+}
+
+void init_codeblocklist_stack()
+{
+    list_codeblock = malloc(sizeof(CODEBLOCK_LIST));
+    list_codeblock->capacity = 1;
+    list_codeblock->index = 0;
+    list_codeblock->data = malloc(list_codeblock->capacity * sizeof(CODEBLOCK));
+}
+
+void add_codeblocklist_stack(const char *text, DATATYPE type)
+{
+    if (list_codeblock->capacity <= list_codeblock->index)
+    {
+        list_codeblock->capacity *= 2;
+        list_codeblock->data = realloc(list_codeblock->data,
+                                       list_codeblock->capacity * sizeof(CODEBLOCK));
+    }
+
+    CODEBLOCK *block = &list_codeblock->data[list_codeblock->index];
+    block->capacity = 1;
+    block->index = 0;
+    block->data = malloc(block->capacity * sizeof(char *));
+    block->type = type;
+
+    block->data[block->index++] = strdup(text);
+
+    list_codeblock->index++;
+}
+
+CODEBLOCK *add_codeblock_stack(const char *text, const char *state, DATATYPE type)
+{
+    CODEBLOCK *code_block = malloc(sizeof(CODEBLOCK));
+    code_block->capacity = 1;
+    code_block->index = 0;
+    code_block->data = malloc(sizeof(char *));
+    code_block->data[0] = strdup(text);
+    code_block->type = type;
+    return code_block;
 }
 
 void init_operation_stack()
@@ -237,6 +333,10 @@ void add_int(int data, char *name)
 void change_int(int data, size_t i)
 {
     int_stack->data[i] = data;
+}
+void change_float(float data, size_t i)
+{
+    float_stack->data[i] = data;
 }
 
 int find_int_by_name(char *name)
@@ -355,6 +455,21 @@ void addChar(char *str, char c)
     str[len + 1] = '\0';
 }
 
+char *addString(char *data, char *pre_string)
+{
+    size_t len1 = strlen(pre_string);
+    size_t len2 = strlen(data);
+
+    char *new_string = malloc(len1 + len2 + 1);
+    if (!new_string)
+        return NULL;
+
+    strcpy(new_string, pre_string);
+    strcat(new_string, data);
+
+    return new_string;
+}
+
 void tokenization(FILE *file)
 {
     char *t = malloc(1);
@@ -368,6 +483,14 @@ void tokenization(FILE *file)
         }
         else if (ch == ';')
         {
+            add_lexer_stack(t, "init", NONE);
+            free(t);
+            t = malloc(1);
+            t[0] = '\0';
+        }
+        else if (ch == '}')
+        {
+            char *newchar = strcat(t, "}");
             add_lexer_stack(t, "init", NONE);
             free(t);
             t = malloc(1);
@@ -397,10 +520,21 @@ void add_values_var()
 {
     for (size_t j = 0; j < lexer_stack->index; j++)
     {
+        printf("Var init \n");
         char *new_lexer = space_adjust(lexer_stack->data[j]);
         find_variable(new_lexer, j, false);
     }
 }
+
+bool isCondition = false;
+char *condition = NULL;
+bool cb_range = false;
+bool if_statment = false;
+bool code_block = false;
+size_t statemtn_start = 0;
+
+char *statement_excute_part = NULL;
+char *statement = "NONE";
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void find_variable(char *data, size_t indx_count, bool init_parse)
@@ -417,13 +551,17 @@ void find_variable(char *data, size_t indx_count, bool init_parse)
     bool is_var_in_op = false;
     bool is_float = false;
     bool is_string = false;
+
+    bool is_if_condition = false;
+
+    bool isBlockCode = false;
+
     for (size_t i = 0; i < str_len; i++)
     {
         bool is_separator = data[i] == ' ';
 
         if (isalpha(data[i]) && !isString && is_value)
         {
-            printf("detect valiable in operation\n");
             is_var_in_op = true;
         }
 
@@ -445,12 +583,94 @@ void find_variable(char *data, size_t indx_count, bool init_parse)
 
             bool asign_symbol = *txt == '=';
             bool is_char = *txt == '\'';
-
             if (asign_symbol)
             {
                 is_value = true;
                 is_variable_name = false;
+                free(txt);
                 continue;
+            }
+
+            if (strcmp(txt, "if") == 0)
+            {
+                statement = "IF";
+                if_statment = true;
+                free(txt);
+                continue;
+            }
+            if (strcmp(txt, "else") == 0)
+            {
+                statement = "ELSE";
+                free(txt);
+                continue;
+            }
+            if (strcmp(txt, "SW") == 0)
+            {
+                statement = "SW";
+                free(txt);
+                continue;
+            }
+            if (strcmp(txt, "FOR") == 0)
+            {
+                statement = "FOR";
+                free(txt);
+                continue;
+            }
+
+            if (if_statment && strcmp(txt, "(") == 0 && !isCondition)
+            {
+                isCondition = true;
+            }
+
+            if (strcmp(txt, "{") != 0)
+            {
+            }
+
+            if (isCondition && strcmp(txt, "{") != 0 && strcmp(txt, "}") != 0)
+            {
+                char *ns = addString(txt, condition ? condition : "");
+                free(condition);
+                condition = ns;
+                // char *ns = addString(txt, condition);
+                if (condition == NULL)
+                {
+                    // handle allocation failure
+                }
+                else
+                {
+                    condition = realloc(condition, strlen(ns));
+                    condition = ns;
+                }
+                free(txt);
+                continue;
+            }
+
+            if (isCondition && strcmp(txt, "{") == 0)
+            {
+                char *space_condition = space_adjust(condition);
+                add_operetors(space_condition);
+                operation_excute(operation_stack);
+                bool isConTrue = condition_apply(space_condition);
+                printf("Condition is : %d\n", isConTrue);
+                isCondition = false;
+                
+                if (isConTrue)
+                {
+                    statement_excute_part = "IF";
+                }
+                else
+                {
+                    statement_excute_part = "ELSE";
+                }
+                code_block = true;
+
+                free(txt);
+                continue;
+            }
+
+            if (statement_excute_part && (strcmp(statement, statement_excute_part) == 0))
+            {
+                CODEBLOCK *block = add_codeblock_stack(data, "true", IF);
             }
 
             // Detect string, char, float
@@ -462,9 +682,12 @@ void find_variable(char *data, size_t indx_count, bool init_parse)
             {
                 printf("float\n");
             }
+
             // Update isString for quotes
             if (is_value && is_string)
+            {
                 isString = !isString;
+            }
 
             // Detect datatype
             if (strcmp(txt, "int") == 0)
@@ -473,6 +696,7 @@ void find_variable(char *data, size_t indx_count, bool init_parse)
                 is_variable_name = true;
                 init_var = true;
                 type = INTEGER_DATATYPE;
+                free(txt);
                 continue;
             }
             else if (strcmp(txt, "float") == 0)
@@ -481,6 +705,7 @@ void find_variable(char *data, size_t indx_count, bool init_parse)
                 is_variable_name = true;
                 init_var = true;
                 type = FLOAT_DATATYPE;
+                free(txt);
                 continue;
             }
             else if (strcmp(txt, "char") == 0)
@@ -489,6 +714,7 @@ void find_variable(char *data, size_t indx_count, bool init_parse)
                 is_variable_name = true;
                 init_var = true;
                 type = CHAR_DATATYPE;
+                free(txt);
                 continue;
             }
             else if (strcmp(txt, "str") == 0)
@@ -497,6 +723,7 @@ void find_variable(char *data, size_t indx_count, bool init_parse)
                 is_variable_name = true;
                 init_var = true;
                 type = STR_DATATYPE;
+                free(txt);
                 continue;
             }
 
@@ -510,12 +737,20 @@ void find_variable(char *data, size_t indx_count, bool init_parse)
                 is_operator = true;
             }
 
+            if (operate_symbol || (is_value && type == FLOAT_DATATYPE))
+            {
+                is_operator = true;
+            }
+
             // Variable assignment
             if (isVariable && is_variable_name)
             {
-                variable_Name = txt;
+                variable_Name = strdup(txt);
+                pre_text = strdup(txt);
                 is_variable_name = false;
-                pre_text = txt;
+                // variable_Name = txt;
+                // pre_text = txt;
+                free(txt);
                 continue;
             }
 
@@ -524,34 +759,28 @@ void find_variable(char *data, size_t indx_count, bool init_parse)
             {
                 if (is_var_in_op)
                 {
-                    if (is_float)
+                    int pre_index_g = index_var_g;
+                    DATATYPE type_var_g = find_variable_data_type(txt);
+                    char str[32];
+                    if (type_var_g == FLOAT_DATATYPE)
                     {
-                        int pre_index_g = index_var_g;
-                        find_variable_data_type(txt);
-                        char str[32];
                         snprintf(str, sizeof(str), "%f", float_stack->data[index_var_g]);
-                        printf("ooss : %f\n", float_stack->data[index_var_g]);
-                        add_operetors(str);
                         is_var_in_op = false;
                         index_var_g = pre_index_g;
                     }
-                    else
+                    else if (type_var_g == INTEGER_DATATYPE)
                     {
-                        int pre_index_g = index_var_g;
-                        find_variable_data_type(txt);
-                        char str[32];
                         snprintf(str, sizeof(str), "%d", int_stack->data[index_var_g]);
-                        printf("ooss : %d\n", int_stack->data[index_var_g]);
-                        add_operetors(str);
                         is_var_in_op = false;
                         index_var_g = pre_index_g;
                     }
+                    add_operetors(str);
                 }
                 else
                 {
                     add_operetors(txt);
                 }
-
+                free(txt);
                 continue;
             }
 
@@ -559,40 +788,51 @@ void find_variable(char *data, size_t indx_count, bool init_parse)
             declear_var = true;
             variable_Name = txt;
             pre_text = txt;
+            isCondition = false;
+            condition = NULL;
+            cb_range = false;
+            if_statment = false;
+            free(txt);
+            continue;
         }
     }
 
     char *txts = combine_char(count, str_len, data);
-
     if ((is_value && type == INTEGER_DATATYPE) || type == FLOAT_DATATYPE)
+    {
         is_operator = true;
+    }
 
     if (is_float && is_operator)
+    {
         isFloat = true;
+    }
+
+    if (if_statment && strcmp(txts, "}") == 0)
+    {
+        if_statment = false;
+    }
 
     if (is_operator)
     {
-        // printf("ssss : %d\n",is_var_in_op);
-        if (is_var_in_op && type == INTEGER_DATATYPE)
+        if (is_var_in_op)
         {
             int pre_index_g = index_var_g;
-            find_variable_data_type(txts);
-            char str[sizeof(int_stack->data[index_var_g]) * 100];
-            snprintf(str, sizeof(str), "%d", int_stack->data[index_var_g]);
-            // printf("ssss : %s\n",str);
-            add_operetors(str);
-            is_var_in_op = false;
-            index_var_g = pre_index_g;
-        }
-        else if (is_var_in_op && type == FLOAT_DATATYPE)
-        {
-            int pre_index_g = index_var_g;
-            find_variable_data_type(txts);
+            DATATYPE type_var_g = find_variable_data_type(txts);
             char str[32];
-            snprintf(str, sizeof(str), "%f", float_stack->data[index_var_g]);
+            if (type_var_g == FLOAT_DATATYPE)
+            {
+                snprintf(str, sizeof(str), "%f", float_stack->data[index_var_g]);
+                is_var_in_op = false;
+                index_var_g = pre_index_g;
+            }
+            else if (type_var_g == INTEGER_DATATYPE)
+            {
+                snprintf(str, sizeof(str), "%d", int_stack->data[index_var_g]);
+                is_var_in_op = false;
+                index_var_g = pre_index_g;
+            }
             add_operetors(str);
-            is_var_in_op = false;
-            index_var_g = pre_index_g;
         }
         else
         {
@@ -605,29 +845,23 @@ void find_variable(char *data, size_t indx_count, bool init_parse)
         // remove _
         remove_underscores(operation_stack);
 
-        if (is_float)
+        if (type == FLOAT_DATATYPE)
         {
             // excute opration wihtout bracket
             float v1 = operation_excute_float(operation_stack); //(float)
             char str[32];
             snprintf(str, sizeof(str), "%f", v1);
-            printf("data %f\n", v1);
-
             // add final result to txts variable
             txts = strdup(str);
-            printf("s data %s\n", str);
         }
-        else
+        else if (type == INTEGER_DATATYPE)
         {
             // excute opration wihtout bracket
-            int v1 = operation_excute(operation_stack); //(float)
+            int v1 = operation_excute(operation_stack); //(int)
             char str[32];
             snprintf(str, sizeof(str), "%d", v1);
-            printf("data %d\n", v1);
-
             // add final result to txts variable
             txts = strdup(str);
-            printf("s data %s\n", str);
         }
     }
 
@@ -651,16 +885,12 @@ void find_variable(char *data, size_t indx_count, bool init_parse)
             }
             break;
         case INTEGER_DATATYPE:
-            // printf("int detected : %s\n",txts);
             change_lexer_type(indx_count, INTEGER_DATATYPE);
             add_int(atoi(txts), variable_Name);
             break;
         case FLOAT_DATATYPE:
-            if (isFloat)
-            {
-                change_lexer_type(indx_count, FLOAT_DATATYPE);
-                add_float(atof(txts), variable_Name);
-            }
+            change_lexer_type(indx_count, FLOAT_DATATYPE);
+            add_float(atof(txts), variable_Name);
             break;
         default:
             break;
@@ -687,13 +917,12 @@ void find_variable(char *data, size_t indx_count, bool init_parse)
         case INTEGER_DATATYPE:
             change_lexer_type(indx_count, INTEGER_DATATYPE);
             change_int(atoi(txts), index_var_g);
-
             break;
         case FLOAT_DATATYPE:
             if (isFloat)
             {
                 change_lexer_type(indx_count, FLOAT_DATATYPE);
-                add_float(atof(txts), variable_Name);
+                change_float(atof(txts), index_var_g);
             }
             break;
         default:
@@ -702,6 +931,7 @@ void find_variable(char *data, size_t indx_count, bool init_parse)
     }
 
     free_operation_stack(operation_stack);
+    free(txts);
 
     // Reset flags
     declear_var = false;
@@ -718,6 +948,11 @@ void find_variable(char *data, size_t indx_count, bool init_parse)
     data_type = "none";
     variable_Name = "none";
     is_var_in_op = false;
+    type = NONE;
+    isCondition = false;
+    condition = NULL;
+    cb_range = false;
+    if_statment = false;
 }
 
 char *space_adjust(char *data)
@@ -732,28 +967,82 @@ char *space_adjust(char *data)
     {
         char current = data[i];
 
-        // If current is a symbol, add space before (if not already space)
-        if ((current == '=' || current == '(' || current == ')' ||
-             current == '+' || current == '-' || current == '/' || current == '*') &&
-            j > 0 && new_data[j - 1] != ' ')
-        {
+        // skip carriage returns/newlines
+        if (current == '\r' || current == '\n')
+            continue;
+
+        // symbols list
+        int is_symbol = (current == '=' || current == '(' || current == ')' ||
+                         current == '+' || current == '-' || current == '/' ||
+                         current == '*' || current == '<' || current == '>' ||
+                         current == '{' || current == '}');
+
+        if (is_symbol && j > 0 && new_data[j - 1] != ' ')
             new_data[j++] = ' ';
-        }
 
         new_data[j++] = current;
 
-        // If current is a symbol, add space after (if next isn’t space or end)
-        if ((current == '=' || current == '(' || current == ')' ||
-             current == '+' || current == '-' || current == '/' || current == '*') &&
-            (i + 1 < len) && data[i + 1] != ' ')
-        {
+        if (is_symbol && (i + 1 < len) && data[i + 1] != ' ')
             new_data[j++] = ' ';
-        }
     }
 
     new_data[j] = '\0';
-    printf("space adjust : %s\n", new_data);
     return new_data;
+}
+
+bool condition_apply(char *data)
+{
+    bool *list = malloc(sizeof(bool) * 5);
+    char *token = strtok(data, " ");
+
+    // just declare pointers, no malloc needed
+    char *left_data = NULL;
+    char *main_op = NULL;
+    char *sub_op = NULL;
+    char *right_data = NULL;
+
+    while (token != NULL)
+    {
+        if (strcmp(token, ">") == 0)
+        {
+            int left_int = atoi(left_data);
+            token = strtok(NULL, " ");
+            right_data = token; // capture right side
+            int right_int = atoi(right_data);
+            bool isTrueResult = left_int > right_int;
+            list[0] = isTrueResult;
+            continue;
+        }
+        else if (strcmp(token, "<") == 0)
+        {
+            int left_int = atoi(left_data);
+            token = strtok(NULL, " ");
+            right_data = token;
+            int right_int = atoi(right_data);
+            bool isTrueResult = left_int < right_int;
+            list[0] = isTrueResult;
+            continue;
+        }
+        else if (strcmp(token, "=") == 0)
+        {
+            int left_int = atoi(left_data);
+            token = strtok(NULL, " ");
+            right_data = token;
+            int right_int = atoi(right_data);
+            bool isTrueResult = left_int == right_int;
+            list[0] = isTrueResult;
+            continue;
+        }
+
+        // store left operand safely
+        left_data = token;
+
+        token = strtok(NULL, " ");
+    }
+
+    bool final = *(list);
+    free(list);
+    return final;
 }
 
 DATATYPE find_variable_data_type(char *variable)
@@ -763,7 +1052,6 @@ DATATYPE find_variable_data_type(char *variable)
         if (strcmp(int_stack->name[i], variable) == 0)
         {
             index_var_g = i;
-            // printf("index %zu\n",i);
             return INTEGER_DATATYPE;
         }
     }
@@ -773,7 +1061,6 @@ DATATYPE find_variable_data_type(char *variable)
         if (strcmp(float_stack->name[i], variable) == 0)
         {
             index_var_g = i;
-            // printf("index %zu\n",i);
             return FLOAT_DATATYPE;
         }
     }
@@ -783,7 +1070,6 @@ DATATYPE find_variable_data_type(char *variable)
         if (strcmp(str_stack->name[i], variable) == 0)
         {
             index_var_g = i;
-            // printf("index %zu\n",i);
             return STR_DATATYPE;
         }
     }
@@ -793,7 +1079,6 @@ DATATYPE find_variable_data_type(char *variable)
         if (strcmp(char_stack->name[i], variable) == 0)
         {
             index_var_g = i;
-            // printf("index %zu\n",i);
             return CHAR_DATATYPE;
         }
     }
@@ -802,15 +1087,31 @@ DATATYPE find_variable_data_type(char *variable)
 
 char *combine_char(size_t start, size_t end, char *data)
 {
-    size_t length = (end - start) + 2;
-    char *txt = malloc(length);
-    txt[0] = '\0';
+    if (!data || start >= end)
+        return NULL;
 
+    size_t length = end - start;
+    char *txt = calloc(length + 1, 1); // zero‑initialized
+    if (!txt)
+        return NULL;
+
+    size_t j = 0;
     for (size_t i = start; i < end; i++)
     {
-        addChar(txt, data[i]);
+        // skip spaces and carriage returns/newlines
+        if (data[i] != ' ' && data[i] != '\r' && data[i] != '\n')
+        {
+            txt[j++] = data[i];
+        }
     }
-    txt[length] = '\0';
+    txt[j] = '\0';
+
+    if (j == 0)
+    {
+        free(txt);
+        return NULL;
+    }
+
     return txt;
 }
 
@@ -900,11 +1201,9 @@ static float apply_operation_float(float left, float right, const char *op)
 
 int operation_excute(OPERATION *operation)
 {
-    // printf("operation excute\n");
     size_t i = 0;
     while (i < operation->index)
     {
-        // printf("char : %s\n",operation->data[i]);
         char *op = operation->data[i];
         if (strcmp(op, "*") == 0 || strcmp(op, "/") == 0)
         {
@@ -982,13 +1281,179 @@ int operation_excute(OPERATION *operation)
     return atoi(operation_stack->data[0]);
 }
 
-float operation_excute_float(OPERATION *operation)
+int operation_excute_bool(OPERATION *operation)
 {
-    // printf("operation excute\n");
     size_t i = 0;
     while (i < operation->index)
     {
-        // printf("char : %s\n",operation->data[i]);
+        char *op = operation->data[i];
+        if (strcmp(op, "*") == 0 || strcmp(op, "/") == 0)
+        {
+            if (i == 0 || i + 1 >= operation->index)
+            {
+                fprintf(stderr, "Invalid expression near operator %s\n", op);
+                return 0;
+            }
+
+            int left = atoi(operation->data[i - 1]);
+            int right = atoi(operation->data[i + 1]);
+            int result = apply_operation(left, right, op);
+
+            char buffer[32];
+            sprintf(buffer, "%d", result); // (int)
+
+            free(operation->data[i - 1]);
+            operation->data[i - 1] = strdup(buffer);
+
+            free(operation->data[i]);
+            free(operation->data[i + 1]);
+
+            for (size_t k = i; k + 2 < operation->index; k++)
+            {
+                operation->data[k] = operation->data[k + 2];
+            }
+
+            operation->index -= 2;
+            i = 0;
+        }
+        else
+        {
+            i++;
+        }
+    }
+
+    i = 0;
+    while (i < operation->index)
+    {
+        char *op = operation->data[i];
+        if (strcmp(op, "+") == 0 || strcmp(op, "-") == 0)
+        {
+            if (i == 0 || i + 1 >= operation->index)
+            {
+                fprintf(stderr, "Invalid expression near operator %s\n", op);
+                return 0;
+            }
+
+            int left = atoi(operation->data[i - 1]);
+            int right = atoi(operation->data[i + 1]);
+            int result = apply_operation(left, right, op);
+
+            char buffer[32];
+            sprintf(buffer, "%d", result); //(int)
+
+            free(operation->data[i - 1]);
+            operation->data[i - 1] = strdup(buffer);
+
+            free(operation->data[i]);
+            free(operation->data[i + 1]);
+
+            for (size_t k = i; k + 2 < operation->index; k++)
+            {
+                operation->data[k] = operation->data[k + 2];
+            }
+
+            operation->index -= 2;
+            i = 0;
+        }
+        else
+        {
+            i++;
+        }
+    }
+
+    i = 0;
+    while (i < operation->index)
+    {
+        char *op = operation->data[i];
+        if (strcmp(op, "<") == 0)
+        {
+            if (i == 0 || i + 1 >= operation->index)
+            {
+                fprintf(stderr, "Invalid expression near operator %s\n", op);
+                return 0;
+            }
+            int left = 0;
+            int right = 0;
+            int result = 0;
+
+            if (isNumber(operation->data[i - 1]))
+            {
+                left = atoi(operation->data[i - 1]);
+                right = atoi(operation->data[i + 1]);
+                result = apply_operation(left, right, op);
+            } else {
+                ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+            }
+
+            char buffer[32];
+            sprintf(buffer, "%d", result); //(int)
+
+            free(operation->data[i - 1]);
+            operation->data[i - 1] = strdup(buffer);
+
+            free(operation->data[i]);
+            free(operation->data[i + 1]);
+
+            for (size_t k = i; k + 2 < operation->index; k++)
+            {
+                operation->data[k] = operation->data[k + 2];
+            }
+
+            operation->index -= 2;
+            i = 0;
+        }
+        else if (strcmp(op, ">") == 0)
+        {
+            if (i == 0 || i + 1 >= operation->index)
+            {
+                fprintf(stderr, "Invalid expression near operator %s\n", op);
+                return 0;
+            }
+
+            int left = 0;
+            int right = 0;
+            int result = 0;
+
+            if (isNumber(operation->data[i - 1]))
+            {
+                left = atoi(operation->data[i - 1]);
+                right = atoi(operation->data[i + 1]);
+                result = apply_operation(left, right, op);
+            } else {
+                ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+            }
+
+
+            char buffer[32];
+            sprintf(buffer, "%d", result); //(int)
+
+            free(operation->data[i - 1]);
+            operation->data[i - 1] = strdup(buffer);
+
+            free(operation->data[i]);
+            free(operation->data[i + 1]);
+
+            for (size_t k = i; k + 2 < operation->index; k++)
+            {
+                operation->data[k] = operation->data[k + 2];
+            }
+
+            operation->index -= 2;
+            i = 0;
+        }
+        else
+        {
+            i++;
+        }
+    }
+    return atoi(operation_stack->data[0]);
+}
+
+float operation_excute_float(OPERATION *operation)
+{
+    size_t i = 0;
+    while (i < operation->index)
+    {
         char *op = operation->data[i];
         if (strcmp(op, "*") == 0 || strcmp(op, "/") == 0)
         {
@@ -1003,7 +1468,7 @@ float operation_excute_float(OPERATION *operation)
             float result = apply_operation_float(left, right, op);
 
             char buffer[32];
-            sprintf(buffer, "%f", result); // (int)
+            sprintf(buffer, "%f", result);
 
             free(operation->data[i - 1]);
             operation->data[i - 1] = strdup(buffer);
@@ -1063,10 +1528,11 @@ float operation_excute_float(OPERATION *operation)
             i++;
         }
     }
+
     return atof(operation_stack->data[0]);
 }
 
-int sub_operation_excute_float(SUB_OPERATION *operation)
+float sub_operation_excute_float(SUB_OPERATION *operation)
 {
     size_t i = 0;
     while (i < operation->index)
@@ -1079,13 +1545,11 @@ int sub_operation_excute_float(SUB_OPERATION *operation)
                 fprintf(stderr, "Invalid expression near operator %s\n", op);
                 return 0;
             }
-
             float left = atof(operation->data[i - 1]);
             float right = atof(operation->data[i + 1]);
-            float result = apply_operation(left, right, op);
-
+            float result = apply_operation_float(left, right, op);
             char buffer[32];
-            sprintf(buffer, "%f", result); // (int)
+            sprintf(buffer, "%.6f", result);
 
             free(operation->data[i - 1]);
             operation->data[i - 1] = strdup(buffer);
@@ -1121,13 +1585,12 @@ int sub_operation_excute_float(SUB_OPERATION *operation)
 
             float left = atof(operation->data[i - 1]);
             float right = atof(operation->data[i + 1]);
-            float result = apply_operation(left, right, op);
+            float result = apply_operation_float(left, right, op);
             char buffer[32];
-            sprintf(buffer, "%f", result); // (int)
+            sprintf(buffer, "%.6f", result);
 
             free(operation->data[i - 1]);
             operation->data[i - 1] = strdup(buffer);
-
             free(operation->data[i]);
             free(operation->data[i + 1]);
 
@@ -1266,7 +1729,8 @@ void bracket_operation(bool isFloat)
                 }
 
                 char buffer[32];
-                snprintf(buffer, sizeof(buffer), "%f", res);
+                snprintf(buffer, sizeof(buffer), "%.6f", res);
+
                 if (operation_stack->data[i] != NULL)
                 {
                     free(operation_stack->data[i]);
@@ -1403,6 +1867,7 @@ int main(void)
     init_float_stack();
     init_char_stack();
     init_operation_sub_stack();
+    init_codeblocklist_stack();
 
     FILE *file = fopen("./data/data.txt", "r");
     if (file == NULL)
@@ -1422,6 +1887,7 @@ int main(void)
     {
         printf("name : %s || data : %f\n", float_stack->name[i], float_stack->data[i]);
     }
+
     end = clock();
     cpu_time_used = (((double)(end - start)) / CLOCKS_PER_SEC);
     printf("Time taken: %f seconds\n", cpu_time_used);
