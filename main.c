@@ -139,6 +139,7 @@ float operation_excute_float(OPERATION *operation);
 float sub_operation_excute_float(SUB_OPERATION *operation);
 int sub_operation_excute(SUB_OPERATION *operation);
 void remove_underscores(OPERATION *op);
+bool operation_excute_bool(OPERATION *operation);
 
 int is_number(char *s);
 int is_operators(char *s);
@@ -520,7 +521,6 @@ void add_values_var()
 {
     for (size_t j = 0; j < lexer_stack->index; j++)
     {
-        printf("Var init \n");
         char *new_lexer = space_adjust(lexer_stack->data[j]);
         find_variable(new_lexer, j, false);
     }
@@ -638,6 +638,7 @@ void find_variable(char *data, size_t indx_count, bool init_parse)
                 }
                 else
                 {
+                    add_operetors(txt);
                     condition = realloc(condition, strlen(ns));
                     condition = ns;
                 }
@@ -648,12 +649,13 @@ void find_variable(char *data, size_t indx_count, bool init_parse)
             if (isCondition && strcmp(txt, "{") == 0)
             {
                 char *space_condition = space_adjust(condition);
-                add_operetors(space_condition);
-                operation_excute(operation_stack);
-                bool isConTrue = condition_apply(space_condition);
+
+                // add_operetors(space_condition);
+                bool isConTrue = operation_excute_bool(operation_stack);
+
                 printf("Condition is : %d\n", isConTrue);
                 isCondition = false;
-                
+
                 if (isConTrue)
                 {
                     statement_excute_part = "IF";
@@ -680,7 +682,7 @@ void find_variable(char *data, size_t indx_count, bool init_parse)
 
             if (is_float)
             {
-                printf("float\n");
+                // printf("float\n");
             }
 
             // Update isString for quotes
@@ -748,8 +750,6 @@ void find_variable(char *data, size_t indx_count, bool init_parse)
                 variable_Name = strdup(txt);
                 pre_text = strdup(txt);
                 is_variable_name = false;
-                // variable_Name = txt;
-                // pre_text = txt;
                 free(txt);
                 continue;
             }
@@ -1281,18 +1281,17 @@ int operation_excute(OPERATION *operation)
     return atoi(operation_stack->data[0]);
 }
 
-int operation_excute_bool(OPERATION *operation)
+bool operation_excute_bool(OPERATION *operation)
 {
     size_t i = 0;
-    while (i < operation->index)
-    {
+
+    // Pass 1: handle * and /
+    while (i < operation->index) {
         char *op = operation->data[i];
-        if (strcmp(op, "*") == 0 || strcmp(op, "/") == 0)
-        {
-            if (i == 0 || i + 1 >= operation->index)
-            {
+        if (strcmp(op, "*") == 0 || strcmp(op, "/") == 0) {
+            if (i == 0 || i + 1 >= operation->index) {
                 fprintf(stderr, "Invalid expression near operator %s\n", op);
-                return 0;
+                return false;
             }
 
             int left = atoi(operation->data[i - 1]);
@@ -1300,7 +1299,7 @@ int operation_excute_bool(OPERATION *operation)
             int result = apply_operation(left, right, op);
 
             char buffer[32];
-            sprintf(buffer, "%d", result); // (int)
+            sprintf(buffer, "%d", result);
 
             free(operation->data[i - 1]);
             operation->data[i - 1] = strdup(buffer);
@@ -1308,30 +1307,25 @@ int operation_excute_bool(OPERATION *operation)
             free(operation->data[i]);
             free(operation->data[i + 1]);
 
-            for (size_t k = i; k + 2 < operation->index; k++)
-            {
+            for (size_t k = i; k + 2 < operation->index; k++) {
                 operation->data[k] = operation->data[k + 2];
             }
 
             operation->index -= 2;
             i = 0;
-        }
-        else
-        {
+        } else {
             i++;
         }
     }
 
+    // Pass 2: handle + and -
     i = 0;
-    while (i < operation->index)
-    {
+    while (i < operation->index) {
         char *op = operation->data[i];
-        if (strcmp(op, "+") == 0 || strcmp(op, "-") == 0)
-        {
-            if (i == 0 || i + 1 >= operation->index)
-            {
+        if (strcmp(op, "+") == 0 || strcmp(op, "-") == 0) {
+            if (i == 0 || i + 1 >= operation->index) {
                 fprintf(stderr, "Invalid expression near operator %s\n", op);
-                return 0;
+                return false;
             }
 
             int left = atoi(operation->data[i - 1]);
@@ -1339,7 +1333,7 @@ int operation_excute_bool(OPERATION *operation)
             int result = apply_operation(left, right, op);
 
             char buffer[32];
-            sprintf(buffer, "%d", result); //(int)
+            sprintf(buffer, "%d", result);
 
             free(operation->data[i - 1]);
             operation->data[i - 1] = strdup(buffer);
@@ -1347,106 +1341,58 @@ int operation_excute_bool(OPERATION *operation)
             free(operation->data[i]);
             free(operation->data[i + 1]);
 
-            for (size_t k = i; k + 2 < operation->index; k++)
-            {
+            for (size_t k = i; k + 2 < operation->index; k++) {
                 operation->data[k] = operation->data[k + 2];
             }
 
             operation->index -= 2;
             i = 0;
-        }
-        else
-        {
+        } else {
             i++;
         }
     }
-
+    
+    // Pass 3: handle < and >
     i = 0;
-    while (i < operation->index)
-    {
+    while (i < operation->index) {
         char *op = operation->data[i];
-        if (strcmp(op, "<") == 0)
-        {
-            if (i == 0 || i + 1 >= operation->index)
-            {
+        printf("data is %s\n",op);
+        if (strcmp(op, "<") == 0 || strcmp(op, ">") == 0) {
+            printf("test\n");
+            if (i == 0 || i + 1 >= operation->index) {
                 fprintf(stderr, "Invalid expression near operator %s\n", op);
-                return 0;
-            }
-            int left = 0;
-            int right = 0;
-            int result = 0;
-
-            if (isNumber(operation->data[i - 1]))
-            {
-                left = atoi(operation->data[i - 1]);
-                right = atoi(operation->data[i + 1]);
-                result = apply_operation(left, right, op);
-            } else {
-                ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+                return false;
             }
 
-            char buffer[32];
-            sprintf(buffer, "%d", result); //(int)
-
+            double left = atof(operation->data[i - 1]);
+            double right = atof(operation->data[i + 1]);
+            bool result = (strcmp(op, "<") == 0) ? (left < right) : (left > right);
+            printf("%f | %f\n",left,right);
             free(operation->data[i - 1]);
-            operation->data[i - 1] = strdup(buffer);
+            operation->data[i - 1] = strdup(result ? "true" : "false");
 
             free(operation->data[i]);
             free(operation->data[i + 1]);
 
-            for (size_t k = i; k + 2 < operation->index; k++)
-            {
+            for (size_t k = i; k + 2 < operation->index; k++) {
                 operation->data[k] = operation->data[k + 2];
             }
 
             operation->index -= 2;
             i = 0;
-        }
-        else if (strcmp(op, ">") == 0)
-        {
-            if (i == 0 || i + 1 >= operation->index)
-            {
-                fprintf(stderr, "Invalid expression near operator %s\n", op);
-                return 0;
-            }
-
-            int left = 0;
-            int right = 0;
-            int result = 0;
-
-            if (isNumber(operation->data[i - 1]))
-            {
-                left = atoi(operation->data[i - 1]);
-                right = atoi(operation->data[i + 1]);
-                result = apply_operation(left, right, op);
-            } else {
-                ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-            }
-
-
-            char buffer[32];
-            sprintf(buffer, "%d", result); //(int)
-
-            free(operation->data[i - 1]);
-            operation->data[i - 1] = strdup(buffer);
-
-            free(operation->data[i]);
-            free(operation->data[i + 1]);
-
-            for (size_t k = i; k + 2 < operation->index; k++)
-            {
-                operation->data[k] = operation->data[k + 2];
-            }
-
-            operation->index -= 2;
-            i = 0;
-        }
-        else
-        {
+        } else {
             i++;
         }
     }
-    return atoi(operation_stack->data[0]);
+
+    // Final result: convert "true"/"false" to bool
+    if (strcmp(operation->data[0], "true") == 0) {
+        return true;
+    } else if (strcmp(operation->data[0], "false") == 0) {
+        return false;
+    } else {
+        return atoi(operation->data[0]) != 0;
+    }
 }
 
 float operation_excute_float(OPERATION *operation)
@@ -1694,6 +1640,110 @@ int sub_operation_excute(SUB_OPERATION *operation)
 }
 
 void bracket_operation(bool isFloat)
+{
+    size_t start = 0;
+    size_t i = 0;
+    while (i < operation_stack->index)
+    {
+        char *op = operation_stack->data[i];
+        if (strcmp(op, "(") == 0)
+        {
+            start = i + 1;
+            i++;
+            continue;
+        }
+        else if (strcmp(op, ")") == 0)
+        {
+            if (isFloat)
+            {
+                init_operation_sub_stack();
+                for (size_t j = start; j < i; j++)
+                {
+                    char *char_data = operation_stack->data[j];
+                    add_operetion_sub(char_data);
+                    free(operation_stack->data[j]);
+                    operation_stack->data[j] = strdup("_");
+                }
+                free(operation_stack->data[start - 1]);
+                operation_stack->data[start - 1] = strdup("_");
+
+                float res = sub_operation_excute_float(sub_operation_stack);
+                if (i >= operation_stack->index)
+                {
+                    fprintf(stderr, "Index %zu out of bounds\n", i);
+                    return;
+                }
+
+                char buffer[32];
+                snprintf(buffer, sizeof(buffer), "%.6f", res);
+
+                if (operation_stack->data[i] != NULL)
+                {
+                    free(operation_stack->data[i]);
+                    operation_stack->data[i] = NULL;
+                }
+
+                operation_stack->data[i] = strdup(buffer);
+                if (!operation_stack->data[i])
+                {
+                    fprintf(stderr, "Failed to allocate memory for new string\n");
+                    exit(1);
+                }
+
+                free(sub_operation_stack->data);
+                i = 0;
+                remove_underscores(operation_stack);
+            }
+            else
+            {
+                init_operation_sub_stack();
+                for (size_t j = start; j < i; j++)
+                {
+                    char *char_data = operation_stack->data[j];
+                    add_operetion_sub(char_data);
+                    free(operation_stack->data[j]);
+                    operation_stack->data[j] = strdup("_");
+                }
+                free(operation_stack->data[start - 1]);
+                operation_stack->data[start - 1] = strdup("_");
+
+                int res = sub_operation_excute(sub_operation_stack);
+                if (i >= operation_stack->index)
+                {
+                    fprintf(stderr, "Index %zu out of bounds\n", i);
+                    return;
+                }
+
+                char buffer[32];
+                snprintf(buffer, sizeof(buffer), "%d", res);
+                if (operation_stack->data[i] != NULL)
+                {
+                    free(operation_stack->data[i]);
+                    operation_stack->data[i] = NULL;
+                }
+
+                operation_stack->data[i] = strdup(buffer);
+                if (!operation_stack->data[i])
+                {
+                    fprintf(stderr, "Failed to allocate memory for new string\n");
+                    exit(1);
+                }
+
+                free(sub_operation_stack->data);
+                i = 0;
+                remove_underscores(operation_stack);
+            }
+            continue;
+        }
+        else
+        {
+            i++;
+            continue;
+        }
+    }
+}
+
+void bracket_operation_bool(bool isFloat)
 {
     size_t start = 0;
     size_t i = 0;
